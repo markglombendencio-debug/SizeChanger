@@ -1,4 +1,3 @@
--- Siguraduhing tapos mag-load ang laro bago patakbuhin ang script
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
@@ -24,7 +23,6 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = PlayerGui
 
--- Main Panel (centered)
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Size = UDim2.new(0, 300, 0, 160)
@@ -44,20 +42,15 @@ panelStroke.Thickness = 1
 panelStroke.Transparency = 0.65
 panelStroke.Parent = panel
 
--- Header (drag bar)
 local header = Instance.new("Frame")
 header.Name = "Header"
 header.Size = UDim2.new(1, 0, 0, 38)
-header.Position = UDim2.new(0, 0, 0, 0)
 header.BackgroundColor3 = Color3.fromRGB(19, 21, 37)
 header.BorderSizePixel = 0
 header.Parent = panel
 
-local headerCorner = Instance.new("UICorner")
-headerCorner.CornerRadius = UDim.new(0, 16)
-headerCorner.Parent = header
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 16)
 
--- Fix bottom corners of header
 local headerFix = Instance.new("Frame")
 headerFix.Size = UDim2.new(1, 0, 0, 10)
 headerFix.Position = UDim2.new(0, 0, 1, -10)
@@ -84,7 +77,6 @@ titleLabel.TextSize = 11
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 titleLabel.Parent = header
 
--- Body Layout
 local body = Instance.new("Frame")
 body.Size = UDim2.new(1, -28, 0, 110)
 body.Position = UDim2.new(0, 14, 0, 44)
@@ -96,7 +88,6 @@ bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
 bodyLayout.Padding = UDim.new(0, 8)
 bodyLayout.Parent = body
 
--- Item Row
 local itemRow = Instance.new("Frame")
 itemRow.Size = UDim2.new(1, 0, 0, 36)
 itemRow.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -122,7 +113,6 @@ itemLabel.TextSize = 12
 itemLabel.TextXAlignment = Enum.TextXAlignment.Left
 itemLabel.Parent = itemRow
 
--- Main Button
 local button = Instance.new("TextButton")
 button.Size = UDim2.new(1, 0, 0, 42)
 button.BackgroundColor3 = Color3.fromRGB(80, 40, 200)
@@ -134,7 +124,6 @@ button.LayoutOrder = 2
 button.Parent = body
 Instance.new("UICorner", button).CornerRadius = UDim.new(0, 11)
 
--- Footer
 local footer = Instance.new("Frame")
 footer.Size = UDim2.new(1, 0, 0, 20)
 footer.BackgroundTransparency = 1
@@ -153,15 +142,13 @@ creditsLabel.TextXAlignment = Enum.TextXAlignment.Left
 creditsLabel.Parent = footer
 
 -- ===================== DRAG LOGIC =====================
-local dragging = false
-local dragInput, dragStart, startPos
+local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
 
 header.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
+		dragging  = true
 		dragStart = input.Position
-		startPos = panel.Position
-		
+		startPos  = panel.Position
 		input.Changed:Connect(function()
 			if input.UserInputState == Enum.UserInputState.End then
 				dragging = false
@@ -186,128 +173,186 @@ UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
--- ===================== RESIZER LOGIC =====================
-local isScaled = false
-local currentScale = 1
-local originalTool = nil
-local visualClone = nil
-local renderConnection = nil
-local partMap = {}
+-- ===================== CORE STATE =====================
+local scaledToolName = nil
+local scaledMult     = 1
+local scaleData      = nil
+local visualClone    = nil
+local activeTool     = nil
+local renderConn     = nil
+local partMap        = {}
 
 local allowedSizes = {
 	{name = "NORMAL", mult = 1, color = Color3.fromRGB(160, 160, 180)},
-	{name = "BIG", mult = 3, color = Color3.fromRGB(100, 220, 150)},
-	{name = "MEGA", mult = 6, color = Color3.fromRGB(255, 180, 50)}
+	{name = "BIG",    mult = 3, color = Color3.fromRGB(100, 220, 150)},
+	{name = "MEGA",   mult = 6, color = Color3.fromRGB(255, 180,  50)},
 }
 
-local function clearScale()
-	if renderConnection then renderConnection:Disconnect() renderConnection = nil end
+local function destroyVisual()
+	if renderConn then renderConn:Disconnect() renderConn = nil end
 	if visualClone then visualClone:Destroy() visualClone = nil end
-	if originalTool then
-		-- Ibalik agad sa original na itsura/visibility ang tunay na tool
-		for _, part in ipairs(originalTool:GetDescendants()) do
-			if part:IsA("BasePart") then part.LocalTransparencyModifier = 0 end
-		end
+	if activeTool then
+		pcall(function()
+			for _, p in ipairs(activeTool:GetDescendants()) do
+				if p:IsA("BasePart") then
+					p.LocalTransparencyModifier = 0
+				end
+			end
+		end)
 	end
-	partMap = {}
-	originalTool = nil
-	isScaled = false
-	currentScale = 1
+	partMap    = {}
+	activeTool = nil
 end
 
-local function scaleTool(tool, scaleMult)
-	clearScale()
-	local character = LocalPlayer.Character
-	if not character then return end
-	
-	originalTool = tool
-	currentScale = scaleMult
-	
-	-- Kung Normal (1x), hindi na kailangan ng giant clone overlay
-	if scaleMult == 1 then
-		isScaled = true
-		return
-	end
-	
-	visualClone = tool:Clone()
-	visualClone.Name = "AnimatedVisual_" .. tool.Name
-	visualClone:ScaleTo(scaleMult)
-	
-	for _, part in ipairs(visualClone:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.Anchored = true
-			part.CanCollide = false
-			part.CanTouch = false
-			part.CanQuery = false
-			part.Massless = true
-			part.CustomPhysicalProperties = PhysicalProperties.new(0,0,0,0,0)
-			part.LocalTransparencyModifier = 0
-		elseif part:IsA("Script") or part:IsA("LocalScript") or part:IsA("TouchTransmitter") then
-			part:Destroy()
+local function buildVisual(tool, mult)
+	destroyVisual()
+	if mult <= 1 then return end
+
+	activeTool = tool
+
+	local clone = tool:Clone()
+	clone.Name  = "__BigVisual__"
+	pcall(function() clone:ScaleTo(mult) end)
+
+	for _, p in ipairs(clone:GetDescendants()) do
+		if p:IsA("BasePart") then
+			p.Anchored    = true
+			p.CanCollide  = false
+			p.CanTouch    = false
+			p.CanQuery    = false
+			p.Massless    = true
+			p.CustomPhysicalProperties = PhysicalProperties.new(0,0,0,0,0)
+			p.LocalTransparencyModifier = 0
+		elseif p:IsA("Script") or p:IsA("LocalScript") or p:IsA("TouchTransmitter") then
+			p:Destroy()
 		end
 	end
-	
-	partMap = {}
-	for _, origPart in ipairs(tool:GetDescendants()) do
-		if origPart:IsA("BasePart") then
-			local clonePart = visualClone:FindFirstChild(origPart.Name, true)
-			if clonePart and clonePart:IsA("BasePart") then
-				partMap[origPart] = clonePart
+
+	for _, orig in ipairs(tool:GetDescendants()) do
+		if orig:IsA("BasePart") then
+			local cp = clone:FindFirstChild(orig.Name, true)
+			if cp and cp:IsA("BasePart") then
+				partMap[orig] = cp
 			end
 		end
 	end
-	
-	visualClone.Parent = Workspace.CurrentCamera
-	
-	for _, part in ipairs(tool:GetDescendants()) do
-		if part:IsA("BasePart") then part.LocalTransparencyModifier = 1 end
+
+	clone.Parent = Workspace.CurrentCamera
+	visualClone  = clone
+
+	for _, p in ipairs(tool:GetDescendants()) do
+		if p:IsA("BasePart") then
+			p.LocalTransparencyModifier = 1
+		end
 	end
-	
-	renderConnection = RunService.RenderStepped:Connect(function()
-		-- INSTANT RESET: Kapag nawala ang tool sa character, clear agad!
-		if not tool or not tool.Parent or tool.Parent ~= character or not visualClone then
-			clearScale()
+
+	renderConn = RunService.RenderStepped:Connect(function()
+		if not tool or not tool.Parent or not visualClone then
+			destroyVisual()
 			return
 		end
-		for origPart, clonePart in pairs(partMap) do
-			if origPart and origPart.Parent and clonePart and clonePart.Parent then
-				clonePart.CanCollide = false
-				clonePart.Anchored = true
-				local relativeCFrame = tool:GetPivot():ToObjectSpace(origPart.CFrame)
-				local scaledPosition = relativeCFrame.Position * scaleMult
-				clonePart.CFrame = tool:GetPivot():ToWorldSpace(CFrame.new(scaledPosition) * CFrame.Angles(relativeCFrame:ToEulerAnglesXYZ()))
+		local pivot = tool:GetPivot()
+		for orig, cp in pairs(partMap) do
+			if orig and orig.Parent and cp and cp.Parent then
+				pcall(function()
+					local rel   = pivot:ToObjectSpace(orig.CFrame)
+					local scaledPos = rel.Position * mult
+					cp.CFrame = pivot:ToWorldSpace(
+						CFrame.new(scaledPos) * CFrame.Angles(rel:ToEulerAnglesXYZ())
+					)
+					cp.Anchored   = true
+					cp.CanCollide = false
+				end)
 			end
 		end
 	end)
-	isScaled = true
 end
 
+-- ===================== CHECKER LOOP =====================
+task.spawn(function()
+	local lastTool = nil
+
+	while screenGui and screenGui.Parent do
+		task.wait(0.05)
+		local character = LocalPlayer.Character
+		if not character then
+			lastTool = nil
+			continue
+		end
+
+		local tool = character:FindFirstChildOfClass("Tool")
+
+		if tool then
+			if tool ~= lastTool then
+				lastTool = tool
+
+				if scaledToolName and tool.Name == scaledToolName then
+					buildVisual(tool, scaledMult)
+					panelStroke.Color    = scaleData.color
+					itemLabel.Text       = "✅ " .. tool.Name .. "  [" .. scaleData.name .. "]"
+					itemLabel.TextColor3 = Color3.fromRGB(100, 220, 150)
+				else
+					destroyVisual()
+					itemLabel.Text       = "✅ " .. tool.Name .. "  [NORMAL]"
+					itemLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+					panelStroke.Color    = Color3.fromRGB(130, 80, 255)
+				end
+			else
+				if scaledToolName and tool.Name == scaledToolName then
+					if not visualClone or activeTool ~= tool then
+						buildVisual(tool, scaledMult)
+						panelStroke.Color    = scaleData.color
+						itemLabel.Text       = "✅ " .. tool.Name .. "  [" .. scaleData.name .. "]"
+						itemLabel.TextColor3 = Color3.fromRGB(100, 220, 150)
+					end
+				end
+			end
+
+		else
+			-- Walang tool na hawak
+			if lastTool ~= nil then
+				lastTool = nil
+				destroyVisual()
+			end
+
+			-- Palaging ganito kapag walang equipped pet
+			itemLabel.Text       = "❌ No pet equipped"
+			itemLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+			panelStroke.Color    = Color3.fromRGB(130, 80, 255)
+		end
+	end
+end)
+
+-- ===================== BUTTON =====================
 local function doRandomSize()
 	local character = LocalPlayer.Character
 	if not character then return end
 	local tool = character:FindFirstChildOfClass("Tool")
-	
+
 	if tool then
-		local selectedData = allowedSizes[math.random(1, #allowedSizes)]
-		scaleTool(tool, selectedData.mult)
-		
-		panelStroke.Color = selectedData.color
-		itemLabel.Text = "✅ " .. tool.Name
+		local data = allowedSizes[math.random(1, #allowedSizes)]
+
+		scaledToolName = tool.Name
+		scaledMult     = data.mult
+		scaleData      = data
+
+		buildVisual(tool, data.mult)
+		panelStroke.Color    = data.color
+		itemLabel.Text       = "✅ " .. tool.Name .. "  [" .. data.name .. "]"
 		itemLabel.TextColor3 = Color3.fromRGB(100, 220, 150)
-		
+
 		TweenService:Create(button, TweenInfo.new(0.1), {BackgroundColor3 = Color3.fromRGB(100, 60, 220)}):Play()
 		task.wait(0.1)
 		TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(80, 40, 200)}):Play()
 	else
-		itemLabel.Text = "❌ No pet equipped"
+		itemLabel.Text       = "❌ No pet equipped"
 		itemLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
-		button.Text = "❗ Hold a pet first!"
+		button.Text          = "❗ Hold a pet first!"
 		task.wait(1.2)
 		button.Text = "🎲 Random Size"
 	end
 end
 
--- Button Listeners
 button.MouseButton1Click:Connect(doRandomSize)
 
 button.MouseEnter:Connect(function()
@@ -317,43 +362,19 @@ button.MouseLeave:Connect(function()
 	TweenService:Create(button, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(80, 40, 200)}):Play()
 end)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
 	if input.KeyCode == Enum.KeyCode.R then doRandomSize() end
 end)
 
--- Mabilis na Continuous Checker Loop (Ginawang 0.05 para instant maramdaman)
-task.spawn(function()
-	while screenGui and screenGui.Parent do
-		task.wait(0.05)
-		local character = LocalPlayer.Character
-		if character then
-			local tool = character:FindFirstChildOfClass("Tool")
-			if tool then
-				itemLabel.Text = "✅ " .. tool.Name
-				itemLabel.TextColor3 = Color3.fromRGB(100, 220, 150)
-				-- Kung biglang nagpalit ng tool habang naka-scale
-				if isScaled and originalTool ~= tool then
-					scaleTool(tool, currentScale)
-				end
-			else
-				-- INSTANT RETURN TO NORMAL SIZE KAPAG HINDI NA HAWAK
-				if isScaled or visualClone or originalTool then 
-					clearScale() 
-				end
-				itemLabel.Text = "❌ No pet equipped"
-				itemLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
-				panelStroke.Color = Color3.fromRGB(130, 80, 255)
-			end
-		end
-	end
-end)
-
 LocalPlayer.CharacterAdded:Connect(function()
-	clearScale()
-	itemLabel.Text = "❌ No pet equipped"
+	destroyVisual()
+	scaledToolName = nil
+	scaledMult     = 1
+	scaleData      = nil
+	itemLabel.Text       = "❌ No pet equipped"
 	itemLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
-	panelStroke.Color = Color3.fromRGB(130, 80, 255)
+	panelStroke.Color    = Color3.fromRGB(130, 80, 255)
 end)
 
-print("✅ UI Fixed - Instant automatic back to normal size kapag binitawan ang pet!")
+print("✅ READY: Clean UI - Only No pet / NORMAL / BIG / MEGA")
